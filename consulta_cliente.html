@@ -106,6 +106,26 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
 .spinner { width:32px; height:32px; border:2.5px solid var(--surface2); border-top-color:var(--yellow); border-radius:50%; animation:spin 0.65s linear infinite; margin:0 auto 1rem; }
 @keyframes spin { to{transform:rotate(360deg)} }
 
+.address-list-wrap { padding:0.5rem 0 1rem; }
+.address-list-header { text-align:center; padding:1.25rem 1rem 1.25rem; }
+.address-list-header h3 { font-size:1rem; font-weight:600; margin-bottom:0.4rem; color:var(--text2); }
+.address-list-header p { font-size:0.83rem; color:var(--muted); line-height:1.5; }
+.address-list { display:flex; flex-direction:column; gap:0.5rem; }
+.address-item {
+  display:flex; align-items:center; gap:0.75rem;
+  width:100%; text-align:left; background:var(--surface);
+  border:1px solid var(--border2); border-radius:14px;
+  padding:0.85rem 1rem; cursor:pointer; font-family:inherit;
+  transition:border-color 0.15s, background 0.15s;
+}
+.address-item:hover { border-color:var(--yellow); background:var(--surface2); }
+.address-item-num {
+  flex-shrink:0; font-size:0.75rem; font-weight:700; color:var(--yellow);
+  background:var(--yellow-dim); border-radius:8px; padding:0.3rem 0.55rem;
+  letter-spacing:0.02em;
+}
+.address-item-name { font-size:0.9rem; color:var(--text); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
 #result { display:none; }
 .result-card { background:var(--surface); border:1px solid var(--border2); border-radius:20px; overflow:hidden; }
 
@@ -184,7 +204,7 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
 
   <div class="hero">
     <h1>Consulta <span>Comercial</span></h1>
-    <p>Pesquise por código ou CNPJ/CPF</p>
+    <p>Pesquise por código, CNPJ/CPF ou nome da rua</p>
   </div>
 
   <div class="search-wrap">
@@ -192,11 +212,11 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
       placeholder="Aguardando carregamento..." autocomplete="off" disabled>
     <button class="btn-search" id="btnSearch" onclick="buscar()" disabled>Buscar</button>
   </div>
-  <p class="search-hint">Digite apenas números</p>
+  <p class="search-hint">Digite código, CNPJ/CPF ou nome da rua</p>
 
   <div class="state" id="stateInit" style="display:none">
     <h3>Pronto para buscar</h3>
-    <p>Digite o código ou documento do cliente</p>
+    <p>Digite o código, documento ou endereço do cliente</p>
   </div>
 
   <div class="state" id="stateLoad" style="display:none">
@@ -207,6 +227,14 @@ body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text)
   <div class="state" id="stateEmpty" style="display:none">
     <h3>Cliente não encontrado</h3>
     <p>Nenhum resultado para <strong id="termoBusca" style="color:var(--text2)"></strong></p>
+  </div>
+
+  <div class="address-list-wrap" id="stateAddressList" style="display:none">
+    <div class="address-list-header">
+      <h3>Escolha o número da rua</h3>
+      <p>Encontramos vários PDVs para <strong id="addressTermo" style="color:var(--text2)"></strong> &middot; <span id="addressCount"></span></p>
+    </div>
+    <div class="address-list" id="addressList"></div>
   </div>
 
   <div id="result">
@@ -310,8 +338,19 @@ const RAW = [["20791","02976489939","BEBIDAS E TABACARIA","ARLINDO DOS SANTOS","
 // [6]=rua [7]=num [8]=bairro [9]=cidade [10]=uf [11]=tel [12]=contrato
 // [13]=setor [14]=rn [15]=visita
 
-const mapCod = {}, mapDoc = {};
+const mapCod = {}, mapDoc = {}, mapRua = {};
 let ready = false;
+
+function normalizarRua(s) {
+  if (!s) return '';
+  let n = String(s)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .toUpperCase()
+    .trim();
+  n = n.replace(/^(RUA|AV|AVENIDA|TRAVESSA|TRAV|ALAMEDA|AL|ESTRADA|EST|RODOVIA|ROD)\.?\s+/, '');
+  n = n.replace(/\s+/g, ' ').trim();
+  return n;
+}
 
 function buildIndex() {
   const bar = document.getElementById('bootBar');
@@ -325,6 +364,11 @@ function buildIndex() {
       const r = RAW[i];
       if (r[0]) mapCod[r[0]] = r;
       if (r[1]) mapDoc[r[1]] = r;
+      const ruaKey = normalizarRua(r[6]);
+      if (ruaKey) {
+        if (!mapRua[ruaKey]) mapRua[ruaKey] = [];
+        mapRua[ruaKey].push(r);
+      }
     }
     const pct = Math.round((i / total) * 100);
     bar.style.width = pct + '%';
@@ -337,7 +381,7 @@ function buildIndex() {
       ready = true;
       document.getElementById('boot').classList.add('hidden');
       document.getElementById('searchInput').disabled = false;
-      document.getElementById('searchInput').placeholder = 'Código ou CNPJ/CPF...';
+      document.getElementById('searchInput').placeholder = 'Código, CNPJ/CPF ou rua...';
       document.getElementById('btnSearch').disabled = false;
       document.getElementById('stateInit').style.display = 'flex';
       document.getElementById('searchInput').focus();
@@ -371,7 +415,7 @@ function formatTel(t) {
 }
 
 function showState(which) {
-  ['stateInit','stateLoad','stateEmpty','result'].forEach(id => {
+  ['stateInit','stateLoad','stateEmpty','stateAddressList','result'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = id === which ? (id === 'result' ? 'block' : 'flex') : 'none';
   });
@@ -385,14 +429,55 @@ function buscar() {
   showState('stateLoad');
   setTimeout(() => {
     const found = mapCod[raw] || mapCod[termo] || mapDoc[termo] || mapDoc[raw];
-    if (!found) {
-      document.getElementById('termoBusca').textContent = '"' + raw + '"';
-      showState('stateEmpty');
+    if (found) {
+      mostrar(found);
+      showState('result');
       return;
     }
-    mostrar(found);
-    showState('result');
+
+    // Não achou por código/documento: tenta por endereço (rua/avenida)
+    const ruaKey = normalizarRua(raw);
+    const porRua = ruaKey ? mapRua[ruaKey] : null;
+    if (porRua && porRua.length === 1) {
+      mostrar(porRua[0]);
+      showState('result');
+      return;
+    }
+    if (porRua && porRua.length > 1) {
+      mostrarListaEndereco(raw, porRua);
+      showState('stateAddressList');
+      return;
+    }
+
+    document.getElementById('termoBusca').textContent = '"' + raw + '"';
+    showState('stateEmpty');
   }, 100);
+}
+
+function mostrarListaEndereco(termoOriginal, registros) {
+  document.getElementById('addressTermo').textContent = '"' + termoOriginal + '"';
+  document.getElementById('addressCount').textContent = registros.length + (registros.length === 1 ? ' resultado encontrado' : ' resultados encontrados');
+  const list = document.getElementById('addressList');
+  list.innerHTML = '';
+  registros
+    .slice()
+    .sort((a, b) => {
+      const na = parseInt(String(a[7]).replace(/\D/g, ''), 10);
+      const nb = parseInt(String(b[7]).replace(/\D/g, ''), 10);
+      if (isNaN(na) && isNaN(nb)) return 0;
+      if (isNaN(na)) return 1;
+      if (isNaN(nb)) return -1;
+      return na - nb;
+    })
+    .forEach(r => {
+      const item = document.createElement('button');
+      item.className = 'address-item';
+      const numero = val(r[7]) || 'S/N';
+      const nome = val(r[2]) || val(r[3]) || 'Sem nome';
+      item.innerHTML = `<span class="address-item-num">Nº ${numero}</span><span class="address-item-name">${nome}</span>`;
+      item.onclick = () => { mostrar(r); showState('result'); };
+      list.appendChild(item);
+    });
 }
 
 function mostrar(r) {
